@@ -6,4 +6,20 @@ public class LogSegment {
         this.channel = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE,
                 StandardOpenOption.CREATE);
     }
+
+    public synchronized long append(byte[] payload) throws IOException {
+        long currentOffset = nextOffset++;
+        ByteBuffer buffer = ByteBuffer.allocate(4 + 8 + payload.length);
+
+        buffer.putInt(payload.length);
+        buffer.putLong(currentOffset);
+        buffer.put(payload);
+
+        buffer.flip();
+
+        while (buffer.hasRemaining()) {
+            channel.write(buffer);
+        }
+        return currentOffset;
+    }
 }
