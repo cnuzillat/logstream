@@ -22,4 +22,34 @@ public class LogSegment {
         }
         return currentOffset;
     }
+
+    public List<String> readAll() throws IOException {
+        channel.position(0);
+
+        List<String> records = new ArrayList<>();
+
+        ByteBuffer header = ByteBuffer.allocate(4 + 8);
+
+        while (true) {
+            header.clear();
+
+            int read = channel.read(header);
+            if (read < 12) {
+                break;
+            }
+            header.flip();
+
+            int length = header.getInt();
+            long offset = header.getLong();
+
+            ByteBuffer payloadBuffer = ByteBuffer.allocate(length);
+            channel.read(payloadBuffer);
+            payloadBuffer.flip();
+
+            byte[] payload = new byte[length];
+            payloadBuffer.get(payload);
+            records.add(payload + ": " + new String(payload));
+        }
+        return records;
+    }
 }
