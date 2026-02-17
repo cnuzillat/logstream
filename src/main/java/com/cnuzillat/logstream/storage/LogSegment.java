@@ -1,3 +1,14 @@
+package com.cnuzillat.logstream.storage;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 public class LogSegment {
     private final FileChannel channel;
     private long nextOffset = 0;
@@ -48,7 +59,7 @@ public class LogSegment {
 
             byte[] payload = new byte[length];
             payloadBuffer.get(payload);
-            records.add(payload + ": " + new String(payload));
+            records.add(Arrays.toString(payload) + ": " + new String(payload));
         }
         return records;
     }
