@@ -6,17 +6,17 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class LogSegment {
     private final FileChannel channel;
     private long nextOffset = 0;
+    private final DurabilityMode durabilityMode;
 
-    public LogSegment(Path path) throws IOException {
+    public LogSegment(Path path, DurabilityMode durabilityMode) throws IOException {
         this.channel = FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE,
                 StandardOpenOption.CREATE);
-
+        this.durabilityMode = durabilityMode;
         recoverOffset();
     }
 
@@ -73,7 +73,22 @@ public class LogSegment {
         buffer.flip();
 
         while (buffer.hasRemaining()) {
-            channel.write(buffer);
+            int bytesWritten = channel.write(buffer);
+            if (bytesWritten == 0) {
+                Thread.yield();
+            }
+        }
+
+
+        switch (durabilityMode) {
+            case FORCE_EVERY_APPEND:
+                channel.force(false);
+                break;
+            case PERIODIC_FLUSH:
+                // TODO: implement batched flush
+                throw new UnsupportedOperationException();
+            case NO_FLUSH:
+                break;
         }
 
         return currentOffset;
