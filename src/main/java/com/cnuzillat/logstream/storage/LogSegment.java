@@ -24,18 +24,34 @@ public class LogSegment {
         channel.position(0);
 
         ByteBuffer header = ByteBuffer.allocate(12);
-
         long lastOffset = -1;
 
         while (true) {
+            long recordStartPosition = channel.position();
+
             header.clear();
-            int read = channel.read(header);
-            if (read < 12) {
+            while (header.hasRemaining()) {
+                if (channel.read(header) == -1) {
+                    break;
+                }
+            }
+
+            if (header.position() < 12) {
                 break;
             }
+
             header.flip();
             int length = header.getInt();
             long offset = header.getLong();
+
+            long remainingFileBytes = channel.size() - channel.position();
+
+            if (remainingFileBytes < length) {
+                channel.truncate(recordStartPosition);
+                channel.force(true);
+                channel.position(recordStartPosition);
+                break;
+            }
 
             channel.position(channel.position() + length);
 
@@ -47,6 +63,7 @@ public class LogSegment {
 
     public synchronized long append(byte[] payload) throws IOException {
         long currentOffset = nextOffset++;
+
         ByteBuffer buffer = ByteBuffer.allocate(4 + 8 + payload.length);
 
         buffer.putInt(payload.length);
@@ -67,28 +84,41 @@ public class LogSegment {
 
         List<String> records = new ArrayList<>();
 
-        ByteBuffer header = ByteBuffer.allocate(4 + 8);
+        ByteBuffer header = ByteBuffer.allocate(12);
 
         while (true) {
             header.clear();
 
-            int read = channel.read(header);
-            if (read < 12) {
-                break;
+            header.clear();
+            while (header.hasRemaining()) {
+                int bytesRead = channel.read(header);
+                if (bytesRead == -1) {
+                    return records;
+                }
             }
             header.flip();
 
             int length = header.getInt();
             long offset = header.getLong();
 
+            if (length < 0 || length > channel.size() - channel.position()) {
+                return records;
+            }
+
             ByteBuffer payloadBuffer = ByteBuffer.allocate(length);
-            channel.read(payloadBuffer);
+
+            while (payloadBuffer.hasRemaining()) {
+                int bytesRead = channel.read(payloadBuffer);
+                if (bytesRead == -1) {
+                    return records;
+                }
+            }
+
             payloadBuffer.flip();
 
             byte[] payload = new byte[length];
             payloadBuffer.get(payload);
             records.add(offset + ": " + new String(payload));
         }
-        return records;
     }
 }
