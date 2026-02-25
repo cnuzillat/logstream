@@ -6,6 +6,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.*;
+import java.util.zip.CRC32;
 
 public class LogSegment {
     private final FileChannel channel;
@@ -26,7 +27,7 @@ public class LogSegment {
     private void recoverOffset() throws IOException {
         channel.position(0);
 
-        ByteBuffer header = ByteBuffer.allocate(12);
+        ByteBuffer header = ByteBuffer.allocate(16);
         long lastOffset = -1;
 
         while (true) {
@@ -39,13 +40,14 @@ public class LogSegment {
                 }
             }
 
-            if (header.position() < 12) {
+            if (header.position() < 16) {
                 break;
             }
 
             header.flip();
             int length = header.getInt();
             long offset = header.getLong();
+            int storedCrc = header.getInt();
 
             long remainingFileBytes = channel.size() - channel.position();
 
@@ -72,10 +74,21 @@ public class LogSegment {
     public synchronized long append(byte[] payload) throws IOException {
         long currentOffset = nextOffset++;
 
-        ByteBuffer buffer = ByteBuffer.allocate(4 + 8 + payload.length);
+        CRC32 crc = new CRC32();
+
+        ByteBuffer offsetBuffer = ByteBuffer.allocate(8);
+        offsetBuffer.putLong(currentOffset);
+        crc.update(offsetBuffer.array());
+
+        crc.update(payload);
+
+        int crcValue = (int) crc.getValue();
+
+        ByteBuffer buffer = ByteBuffer.allocate(16 + payload.length);
 
         buffer.putInt(payload.length);
         buffer.putLong(currentOffset);
+        buffer.putInt(crcValue);
         buffer.put(payload);
 
         buffer.flip();
@@ -115,7 +128,7 @@ public class LogSegment {
 
         List<String> records = new ArrayList<>();
 
-        ByteBuffer header = ByteBuffer.allocate(12);
+        ByteBuffer header = ByteBuffer.allocate(16);
 
         while (true) {
             header.clear();
@@ -130,8 +143,10 @@ public class LogSegment {
 
             int length = header.getInt();
             long offset = header.getLong();
+            int storedCrc = header.getInt();
 
-            if (length < 0 || length > channel.size() - channel.position()) {
+            long fileSize = channel.size();
+            if (length < 0 || length > fileSize - channel.position()) {
                 return records;
             }
 
@@ -148,6 +163,17 @@ public class LogSegment {
 
             byte[] payload = new byte[length];
             payloadBuffer.get(payload);
+
+            CRC32 crc = new CRC32();
+            crc.update(ByteBuffer.allocate(8).putLong(offset).array());
+            crc.update(payload);
+
+            int computerCrc = (int) crc.getValue();
+
+            if (computerCrc != storedCrc) {
+                throw new IOException("CRC mismatch at offset " + offset);
+            }
+
             records.add(offset + ": " + new String(payload));
         }
     }
@@ -162,7 +188,7 @@ public class LogSegment {
             channel.position(index.get(floor));
         }
 
-        ByteBuffer header = ByteBuffer.allocate(12);
+        ByteBuffer header = ByteBuffer.allocate(16);
 
         while (true) {
             header.clear();
@@ -177,8 +203,10 @@ public class LogSegment {
             header.flip();
             int length = header.getInt();
             long offset = header.getLong();
+            int storedCrc = header.getInt();
 
-            if (length < 0 || length > channel.size() - channel.position()) {
+            long fileSize = channel.size();
+            if (length < 0 || length > fileSize - channel.position()) {
                 return null;
             }
 
